@@ -5,535 +5,481 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.*;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
+import java.awt.event.*;
 import java.io.*;
 import java.net.Socket;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 public class ChatClient extends JFrame {
-    private DefaultListModel<String> contactListModel;
-    private JList<String> contactList;
-    private JLabel chatHeader;
-    private JPanel chatPanel;
-    private JTextField inputField, searchField;
-    private JButton sendButton, addContactBtn, emojiButton;
-    private JPopupMenu emojiMenu;
-
-    private String currentUser;
-    private String selectedUser = "";
-    private PrintWriter out;
+    private String username;
+    private Socket socket;
     private BufferedReader in;
+    private PrintWriter out;
 
-    private Map<String, java.util.List<MessageModel>> chatHistories = new HashMap<>();
-    private Map<String, String> userStatusMap = new HashMap<>(); 
-    private Map<String, Integer> unreadCountMap = new HashMap<>();
-    private Map<String, JLabel> messageLabelMap = new HashMap<>(); 
+    private DefaultListModel<UserStatus> userListModel;
+    private JList<UserStatus> userList;
+    private List<UserStatus> allUsersList = new ArrayList<>();
+    private Map<String, UserStatus> userMap = new HashMap<>();
 
-    enum TickStatus { SENT, DELIVERED, READ }
+    private JTextPane chatArea;
+    private JTextField messageField;
+    private JTextField searchField;
+    private JButton sendButton;
+    private JButton addContactBtn;
+    private JButton logoutBtn; 
+    private JLabel currentChatLabel;
 
-    static class MessageModel {
-        String id;
-        String sender;
-        String text;
-        String time;
-        LocalDate date;
-        TickStatus status;
+    private String selectedUser = "GLOBAL";
 
-        MessageModel(String id, String sender, String text, String time, LocalDate date, TickStatus status) {
-            this.id = id;
-            this.sender = sender;
-            this.text = text;
-            this.time = time;
-            this.date = date;
-            this.status = status;
+    public static class UserStatus {
+        private String name;
+        private boolean isOnline;
+        private int unreadCount;
+
+        public UserStatus(String name, boolean isOnline) {
+            this.name = name;
+            this.isOnline = isOnline;
+            this.unreadCount = 0;
         }
 
-        public String getMsgId() { return id; }
-        public String getSender() { return sender; }
-        public TickStatus getStatus() { return status; }
-        public void setStatus(TickStatus status) { this.status = status; }
+        public String getName() { return name; }
+        public boolean isOnline() { return isOnline; }
+        public void setOnline(boolean online) { this.isOnline = online; }
+        
+        public int getUnreadCount() { return unreadCount; }
+        public void incrementUnread() { this.unreadCount++; }
+        public void resetUnread() { this.unreadCount = 0; }
+
+        @Override
+        public String toString() { return name; }
     }
 
     public ChatClient(String username, Socket socket, BufferedReader in, PrintWriter out) {
-        this.currentUser = username;
+        this.username = username;
+        this.socket = socket;
         this.in = in;
         this.out = out;
 
-        setTitle("WhatsApp - " + currentUser);
-        setSize(920, 650);
+        setTitle("Java Chat System - " + username);
+        setSize(900, 620);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
 
-        // --- LEFT PANEL ---
-        JPanel leftPanel = new JPanel(new BorderLayout());
-        leftPanel.setPreferredSize(new Dimension(300, 0));
+        Color darkBg = new Color(15, 23, 42);
+        Color sidebarBg = new Color(30, 41, 59);
+        Color chatBg = new Color(248, 250, 252);
+        Color accentBlue = new Color(37, 99, 235);
+        Color greenStatus = new Color(34, 197, 94);
+        Color logoutRed = new Color(239, 68, 68);
 
-        // Profile-ka Isticmaalaha oo leh Circular Letter Avatar
-        String myInitial = currentUser.isEmpty() ? "?" : currentUser.substring(0, 1).toUpperCase();
-        JLabel profile = new JLabel("<html><body style='padding: 5px;'>" +
-                "<table cellpadding='0' cellspacing='0'><tr>" +
-                "<td><div style='background-color:#128C7E; color:white; border-radius:50%; width:32px; height:32px; text-align:center; font-weight:bold; font-size:16px; line-height:32px;'>" + myInitial + "</div></td>" +
-                "<td style='padding-left:10px;'><b style='color:white; font-size:14px;'>" + currentUser + "</b></td>" +
-                "</tr></table></body></html>", JLabel.LEFT);
-        
-        profile.setPreferredSize(new Dimension(0, 60));
-        profile.setOpaque(true);
-        profile.setBackground(new Color(7, 94, 84));
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.setBackground(chatBg);
 
-        addContactBtn = new JButton("Add Contact");
-        addContactBtn.setFont(new Font("Segoe UI", Font.BOLD, 13));
-        addContactBtn.setBackground(new Color(18, 140, 126));
+        // TOP HEADER
+        JPanel topPanel = new JPanel(new BorderLayout());
+        topPanel.setBackground(darkBg);
+        topPanel.setPreferredSize(new Dimension(900, 55));
+        topPanel.setBorder(new EmptyBorder(10, 20, 10, 20));
+
+        JLabel headerLabel = new JLabel("Logged in as: " + username, JLabel.LEFT);
+        headerLabel.setForeground(Color.WHITE);
+        headerLabel.setFont(new Font("Segoe UI", Font.BOLD, 15));
+
+        JPanel topEastPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 15, 0));
+        topEastPanel.setOpaque(false);
+
+        currentChatLabel = new JLabel("Chatting with: Everyone (GLOBAL)");
+        currentChatLabel.setForeground(greenStatus);
+        currentChatLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
+
+        logoutBtn = new JButton("Logout");
+        logoutBtn.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        logoutBtn.setBackground(logoutRed);
+        logoutBtn.setForeground(Color.WHITE);
+        logoutBtn.setFocusPainted(false);
+        logoutBtn.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        logoutBtn.setPreferredSize(new Dimension(85, 30));
+
+        topEastPanel.add(currentChatLabel);
+        topEastPanel.add(logoutBtn);
+
+        topPanel.add(headerLabel, BorderLayout.WEST);
+        topPanel.add(topEastPanel, BorderLayout.EAST);
+        mainPanel.add(topPanel, BorderLayout.NORTH);
+
+        // SIDEBAR
+        JPanel sidebarPanel = new JPanel(new BorderLayout());
+        sidebarPanel.setPreferredSize(new Dimension(260, 0));
+        sidebarPanel.setBackground(sidebarBg);
+        sidebarPanel.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, new Color(51, 65, 85)));
+
+        JPanel controlsPanel = new JPanel(new BorderLayout(5, 5));
+        controlsPanel.setBackground(sidebarBg);
+        controlsPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
+
+        searchField = new JTextField();
+        searchField.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        searchField.setBackground(new Color(15, 23, 42));
+        searchField.setForeground(Color.WHITE);
+        searchField.setCaretColor(Color.WHITE);
+        searchField.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(51, 65, 85)),
+                BorderFactory.createEmptyBorder(6, 8, 6, 8)
+        ));
+
+        addContactBtn = new JButton("+ Add");
+        addContactBtn.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        addContactBtn.setBackground(greenStatus);
         addContactBtn.setForeground(Color.WHITE);
+        addContactBtn.setFocusPainted(false);
+        addContactBtn.setCursor(new Cursor(Cursor.HAND_CURSOR));
 
-        contactListModel = new DefaultListModel<>();
-        contactList = new JList<>(contactListModel);
-        contactList.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-        contactList.setFixedCellHeight(60);
+        controlsPanel.add(searchField, BorderLayout.CENTER);
+        controlsPanel.add(addContactBtn, BorderLayout.EAST);
+        sidebarPanel.add(controlsPanel, BorderLayout.NORTH);
 
-        contactList.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                int index = contactList.locationToIndex(e.getPoint());
-                if (index >= 0) {
-                    String rawValue = contactListModel.getElementAt(index);
-                    String cleanName = extractUsername(rawValue);
+        // USER LIST
+        userListModel = new DefaultListModel<>();
+        UserStatus globalStatus = new UserStatus("GLOBAL", true);
+        userListModel.addElement(globalStatus);
+        allUsersList.add(globalStatus);
+        userMap.put("GLOBAL", globalStatus);
 
-                    if (cleanName != null && !cleanName.equals(currentUser)) {
-                        selectedUser = cleanName;
-                        unreadCountMap.put(selectedUser, 0); 
-                        refreshContactListUI();
+        userList = new JList<>(userListModel);
+        userList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        userList.setSelectedIndex(0);
+        userList.setBackground(sidebarBg);
+        userList.setFixedCellHeight(42);
+        userList.setCellRenderer(new UserStatusCellRenderer());
 
-                        String status = userStatusMap.getOrDefault(selectedUser, "OFFLINE");
-                        updateHeaderStatus(selectedUser, status);
-                        loadConversation(selectedUser);
+        userList.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                UserStatus selected = userList.getSelectedValue();
+                if (selected != null) {
+                    selectedUser = selected.getName();
+                    selected.resetUnread();
+                    userList.repaint();
+                    String statusText = selected.isOnline() ? "● Online" : "○ Offline";
+                    currentChatLabel.setText("Chatting with: " + selectedUser + " (" + statusText + ")");
+                    
+                    chatArea.setText("");
+                    
+                    if (!selectedUser.equals("GLOBAL")) {
+                        out.println("GET_HISTORY:" + selectedUser);
                     }
                 }
             }
         });
 
-        leftPanel.add(profile, BorderLayout.NORTH);
-        leftPanel.add(addContactBtn, BorderLayout.SOUTH);
-        leftPanel.add(new JScrollPane(contactList), BorderLayout.CENTER);
+        JScrollPane userScrollPane = new JScrollPane(userList);
+        userScrollPane.setBorder(null);
+        sidebarPanel.add(userScrollPane, BorderLayout.CENTER);
+        mainPanel.add(sidebarPanel, BorderLayout.WEST);
 
-        // --- RIGHT PANEL ---
-        JPanel rightPanel = new JPanel(new BorderLayout());
+        // CHAT PANEL
+        JPanel chatPanel = new JPanel(new BorderLayout());
+        chatPanel.setBackground(chatBg);
 
-        JPanel headerPanel = new JPanel(new BorderLayout());
-        chatHeader = new JLabel("   Dooro qof aad fariin u dirto");
-        chatHeader.setFont(new Font("Segoe UI", Font.BOLD, 15));
-        chatHeader.setPreferredSize(new Dimension(0, 60));
-        chatHeader.setOpaque(true);
-        chatHeader.setBackground(new Color(230, 233, 238));
+        chatArea = new JTextPane();
+        chatArea.setEditable(false);
+        chatArea.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+        chatArea.setBackground(chatBg);
+        chatArea.setBorder(new EmptyBorder(15, 15, 15, 15));
 
-        searchField = new JTextField();
-        searchField.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        searchField.setToolTipText("Raadi fariin...");
-        searchField.setPreferredSize(new Dimension(180, 28));
+        JScrollPane chatScrollPane = new JScrollPane(chatArea);
+        chatScrollPane.setBorder(null);
+        chatPanel.add(chatScrollPane, BorderLayout.CENTER);
 
-        searchField.getDocument().addDocumentListener(new DocumentListener() {
-            public void insertUpdate(DocumentEvent e) { filterMessages(); }
-            public void removeUpdate(DocumentEvent e) { filterMessages(); }
-            public void changedUpdate(DocumentEvent e) { filterMessages(); }
-        });
+        JPanel bottomPanel = new JPanel(new BorderLayout(10, 0));
+        bottomPanel.setBackground(Color.WHITE);
+        bottomPanel.setBorder(new EmptyBorder(12, 15, 12, 15));
 
-        JPanel searchContainer = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 15));
-        searchContainer.setOpaque(false);
-        searchContainer.add(new JLabel("🔍"));
-        searchContainer.add(searchField);
-
-        headerPanel.setBackground(new Color(230, 233, 238));
-        headerPanel.add(chatHeader, BorderLayout.CENTER);
-        headerPanel.add(searchContainer, BorderLayout.EAST);
-
-        chatPanel = new JPanel();
-        chatPanel.setLayout(new BoxLayout(chatPanel, BoxLayout.Y_AXIS));
-        chatPanel.setBackground(new Color(229, 221, 213));
-        chatPanel.setBorder(new EmptyBorder(10, 15, 10, 15));
-
-        JScrollPane scrollPane = new JScrollPane(chatPanel);
-        scrollPane.getVerticalScrollBar().setUnitIncrement(12);
-
-        inputField = new JTextField();
-        inputField.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-
-        emojiButton = new JButton("😊");
-        emojiButton.setFont(new Font("Segoe UI", Font.PLAIN, 16));
-        emojiButton.setFocusPainted(false);
-        emojiButton.setMargin(new Insets(2, 6, 2, 6));
-
-        setupEmojiPicker();
+        messageField = new JTextField();
+        messageField.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+        messageField.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(203, 213, 225)),
+                BorderFactory.createEmptyBorder(8, 12, 8, 12)
+        ));
 
         sendButton = new JButton("Send");
-        sendButton.setFont(new Font("Segoe UI", Font.BOLD, 13));
-        sendButton.setBackground(new Color(7, 94, 84));
+        sendButton.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        sendButton.setBackground(accentBlue);
         sendButton.setForeground(Color.WHITE);
+        sendButton.setFocusPainted(false);
+        sendButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        sendButton.setPreferredSize(new Dimension(95, 38));
 
-        JPanel inputArea = new JPanel(new BorderLayout(5, 0));
-        inputArea.add(emojiButton, BorderLayout.WEST);
-        inputArea.add(inputField, BorderLayout.CENTER);
+        bottomPanel.add(messageField, BorderLayout.CENTER);
+        bottomPanel.add(sendButton, BorderLayout.EAST);
+        chatPanel.add(bottomPanel, BorderLayout.SOUTH);
 
-        JPanel bottom = new JPanel(new BorderLayout(8, 8));
-        bottom.setBorder(new EmptyBorder(8, 8, 8, 8));
-        bottom.add(inputArea, BorderLayout.CENTER);
-        bottom.add(sendButton, BorderLayout.EAST);
+        mainPanel.add(chatPanel, BorderLayout.CENTER);
+        add(mainPanel);
 
-        rightPanel.add(headerPanel, BorderLayout.NORTH);
-        rightPanel.add(scrollPane, BorderLayout.CENTER);
-        rightPanel.add(bottom, BorderLayout.SOUTH);
+        // ACTIONS
+        sendButton.addActionListener(e -> sendMessage());
+        messageField.addActionListener(e -> sendMessage());
 
-        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftPanel, rightPanel);
-        split.setDividerLocation(300);
-        add(split);
+        // LOGOUT ACTION SAX AH
+        logoutBtn.addActionListener(e -> {
+            int confirm = JOptionPane.showConfirmDialog(
+                ChatClient.this, 
+             "Are you sure you want to log out?",
+            "Confirmation",
+
+                JOptionPane.YES_NO_OPTION
+            );
+            if (confirm == JOptionPane.YES_OPTION) {
+                performLogout();
+            }
+        });
 
         addContactBtn.addActionListener(e -> {
-            String newContact = JOptionPane.showInputDialog(this, "Geli username-ka aad ku darsaneyso:");
-            if (newContact != null && !newContact.trim().isEmpty()) {
-                String cleanContact = newContact.trim();
-                if (cleanContact.equals(currentUser)) {
-                    JOptionPane.showMessageDialog(this, "Isku ma darsan kartid magacaaga!");
+            String newPerson = JOptionPane.showInputDialog(this, "Enter the username of the person you want to add.:", "Add Contact", JOptionPane.QUESTION_MESSAGE);
+            if (newPerson != null && !newPerson.trim().isEmpty()) {
+                String name = newPerson.trim();
+                if (name.equalsIgnoreCase(username)) {
+                    JOptionPane.showMessageDialog(this, "Isku ma dari kartid magacaaga!", "Digniin", JOptionPane.WARNING_MESSAGE);
+                } else if (userMap.containsKey(name)) {
+                    JOptionPane.showMessageDialog(this, "User-ka " + name + " mar hore ayuu ku jiraa liiskaaga.", "Digniin", JOptionPane.WARNING_MESSAGE);
                 } else {
-                    out.println("ADD_CONTACT:" + cleanContact);
+                    out.println("ADD_CONTACT:" + name);
                 }
             }
         });
 
-        sendButton.addActionListener(e -> dispatchMessage());
-        inputField.addActionListener(e -> dispatchMessage());
+        searchField.getDocument().addDocumentListener(new DocumentListener() {
+            public void insertUpdate(DocumentEvent e) { filterContacts(searchField.getText().trim()); }
+            public void removeUpdate(DocumentEvent e) { filterContacts(searchField.getText().trim()); }
+            public void changedUpdate(DocumentEvent e) { filterContacts(searchField.getText().trim()); }
+        });
 
-        out.println("GET_CONTACTS");
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                performLogout();
+            }
+        });
 
-        listenIncoming();
+        new Thread(new IncomingReader()).start();
         setVisible(true);
     }
 
-    private void setupEmojiPicker() {
-        emojiMenu = new JPopupMenu();
-        JPanel emojiPanel = new JPanel(new GridLayout(3, 5, 5, 5));
-        emojiPanel.setBorder(new EmptyBorder(5, 5, 5, 5));
-
-        String[] emojis = {"😊", "😂", "❤️", "👍", "🔥", "🙏", "😍", "🎉", "😢", "😎", "🤝", "👏", "😮", "🤔", "✨"};
-        for (String emo : emojis) {
-            JButton btn = new JButton(emo);
-            btn.setFont(new Font("Segoe UI", Font.PLAIN, 16));
-            btn.setFocusPainted(false);
-            btn.addActionListener(e -> {
-                inputField.setText(inputField.getText() + emo);
-                emojiMenu.setVisible(false);
-                inputField.requestFocusInWindow();
-            });
-            emojiPanel.add(btn);
+    private void performLogout() {
+        if (out != null) {
+            out.println("LOGOUT");
+            out.flush();
         }
-
-        emojiMenu.add(emojiPanel);
-        emojiButton.addActionListener(e -> emojiMenu.show(emojiButton, 0, -emojiMenu.getPreferredSize().height));
+        try {
+            if (socket != null && !socket.isClosed()) {
+                socket.close();
+            }
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+        dispose(); 
     }
 
-    private void filterMessages() {
-        if (selectedUser == null || selectedUser.isEmpty()) return;
-        String query = searchField.getText().trim().toLowerCase();
-
-        chatPanel.removeAll();
-        messageLabelMap.clear();
-
-        java.util.List<MessageModel> list = chatHistories.get(selectedUser);
-        if (list != null) {
-            LocalDate lastDate = null;
-            for (MessageModel m : list) {
-                if (query.isEmpty() || m.text.toLowerCase().contains(query)) {
-                    if (lastDate == null || !lastDate.equals(m.date)) {
-                        appendDateDivider(m.date);
-                        lastDate = m.date;
-                    }
-                    boolean isSelf = m.sender.equals(currentUser);
-                    appendBubble(m, isSelf);
-                }
+    private void filterContacts(String query) {
+        userListModel.clear();
+        for (UserStatus u : allUsersList) {
+            if (u.getName().toLowerCase().contains(query.toLowerCase())) {
+                userListModel.addElement(u);
             }
         }
-        chatPanel.revalidate();
-        chatPanel.repaint();
     }
 
-    private void appendDateDivider(LocalDate date) {
-        String labelText;
-        LocalDate today = LocalDate.now();
-
-        if (date.equals(today)) {
-            labelText = "Today";
-        } else if (date.equals(today.minusDays(1))) {
-            labelText = "Yesterday";
-        } else {
-            labelText = date.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
-        }
-
-        JPanel dividerPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
-        dividerPanel.setBackground(new Color(229, 221, 213));
-        dividerPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
-
-        JLabel dateLabel = new JLabel("  " + labelText + "  ");
-        dateLabel.setFont(new Font("Segoe UI", Font.BOLD, 10));
-        dateLabel.setForeground(new Color(100, 100, 100));
-        dateLabel.setOpaque(true);
-        dateLabel.setBackground(new Color(240, 240, 240));
-        dateLabel.setBorder(BorderFactory.createLineBorder(new Color(210, 210, 210), 1, true));
-
-        dividerPanel.add(dateLabel);
-        chatPanel.add(dividerPanel);
-        chatPanel.add(Box.createVerticalStrut(4));
-    }
-
-    private String extractUsername(String rawHtml) {
-        if (rawHtml.contains("<!--NAME:")) {
-            int start = rawHtml.indexOf("<!--NAME:") + 9;
-            int end = rawHtml.indexOf("-->", start);
-            if (start < end) {
-                return rawHtml.substring(start, end).trim();
+    private void addContactToList(String name, boolean isOnline) {
+        SwingUtilities.invokeLater(() -> {
+            if (!userMap.containsKey(name)) {
+                UserStatus newStatus = new UserStatus(name, isOnline);
+                allUsersList.add(newStatus);
+                userMap.put(name, newStatus);
+                filterContacts(searchField.getText().trim());
+            } else {
+                userMap.get(name).setOnline(isOnline);
+                userList.repaint();
             }
+        });
+    }
+
+    private void sendMessage() {
+        String msg = messageField.getText().trim();
+        if (!msg.isEmpty()) {
+            if (selectedUser.equals("GLOBAL")) {
+                out.println("MSG_ALL:" + msg);
+                appendMessage("Me (Global): " + msg);
+            } else {
+                out.println("MSG_PRIVATE:" + selectedUser + ":" + msg);
+                appendMessage("Me: " + msg);
+            }
+            messageField.setText("");
         }
-        return rawHtml.replaceAll("<[^>]*>", "").trim().split(" ")[0];
     }
 
-    private void updateHeaderStatus(String user, String status) {
-        String initial = user.isEmpty() ? "?" : user.substring(0, 1).toUpperCase();
-        String indicator = status.equals("ONLINE") ? "(Online)" : "(Offline)";
-        
-        chatHeader.setText("<html><body style='padding-left: 10px;'>" +
-                "<table cellpadding='0' cellspacing='0'><tr>" +
-                "<td><div style='background-color:#075E54; color:white; border-radius:50%; width:30px; height:30px; text-align:center; font-weight:bold; font-size:14px; line-height:30px;'>" + initial + "</div></td>" +
-                "<td style='padding-left:10px;'><b style='font-size:14px;'>" + user + "</b> <span style='font-size:11px; color:#555555;'>" + indicator + "</span></td>" +
-                "</tr></table></body></html>");
+    private void appendMessage(String msg) {
+        SwingUtilities.invokeLater(() -> {
+            chatArea.setText(chatArea.getText() + msg + "\n");
+        });
     }
 
-    private void dispatchMessage() {
-        String msg = inputField.getText().trim();
-        if (!msg.isEmpty() && selectedUser != null && !selectedUser.isEmpty()) {
-            String msgId = UUID.randomUUID().toString().substring(0, 8);
-            String timeNow = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm"));
-            LocalDate dateNow = LocalDate.now();
+    private class UserStatusCellRenderer extends JPanel implements ListCellRenderer<UserStatus> {
+        private JLabel nameLabel = new JLabel();
+        private JLabel badgeLabel = new JLabel();
+        private JLabel statusLabel = new JLabel();
 
-            out.println("SEND_MSG:" + msgId + ":" + selectedUser + ":" + timeNow + ":" + msg);
+        public UserStatusCellRenderer() {
+            setLayout(new BorderLayout(5, 0));
+            setBorder(new EmptyBorder(8, 12, 8, 12));
 
-            MessageModel model = new MessageModel(msgId, currentUser, msg, timeNow, dateNow, TickStatus.SENT);
+            JPanel rightContainer = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+            rightContainer.setOpaque(false);
+            rightContainer.add(badgeLabel);
+            rightContainer.add(statusLabel);
 
-            java.util.List<MessageModel> history = chatHistories.computeIfAbsent(selectedUser, k -> new ArrayList<>());
+            add(nameLabel, BorderLayout.CENTER);
+            add(rightContainer, BorderLayout.EAST);
+            setOpaque(true);
+        }
 
-            if (history.isEmpty() || !history.get(history.size() - 1).date.equals(dateNow)) {
-                appendDateDivider(dateNow);
+        @Override
+        public Component getListCellRendererComponent(JList<? extends UserStatus> list, UserStatus value, int index, boolean isSelected, boolean cellHasFocus) {
+            nameLabel.setText(value.getName());
+            nameLabel.setFont(new Font("Segoe UI", Font.BOLD, 13));
+
+            if (value.isOnline()) {
+                statusLabel.setText("● Online");
+                statusLabel.setForeground(new Color(34, 197, 94));
+            } else {
+                statusLabel.setText("○ Offline");
+                statusLabel.setForeground(new Color(148, 163, 184));
             }
 
-            history.add(model);
-            appendBubble(model, true);
-            inputField.setText("");
+            if (value.getUnreadCount() > 0) {
+                badgeLabel.setText(" " + value.getUnreadCount() + " ");
+                badgeLabel.setFont(new Font("Segoe UI", Font.BOLD, 11));
+                badgeLabel.setForeground(Color.WHITE);
+                badgeLabel.setBackground(new Color(34, 197, 94));
+                badgeLabel.setOpaque(true);
+                badgeLabel.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
+            } else {
+                badgeLabel.setText("");
+                badgeLabel.setOpaque(false);
+            }
+
+            if (isSelected) {
+                setBackground(new Color(37, 99, 235));
+                nameLabel.setForeground(Color.WHITE);
+                if (!value.isOnline()) statusLabel.setForeground(new Color(226, 232, 240));
+            } else {
+                setBackground(new Color(30, 41, 59));
+                nameLabel.setForeground(Color.WHITE);
+            }
+            return this;
         }
     }
 
-    private void listenIncoming() {
-        new Thread(() -> {
+    private class IncomingReader implements Runnable {
+        @Override
+        public void run() {
+            String message;
             try {
-                String line;
-                while ((line = in.readLine()) != null) {
-                    final String res = line;
-                    SwingUtilities.invokeLater(() -> processProtocol(res));
+                while ((message = in.readLine()) != null) {
+                    final String msg = message;
+
+                    if (msg.startsWith("STATUS_UPDATE:")) {
+                        String[] parts = msg.split(":");
+                        if (parts.length >= 3) {
+                            String uName = parts[1].trim();
+                            boolean isOnline = parts[2].equalsIgnoreCase("ONLINE");
+
+                            SwingUtilities.invokeLater(() -> {
+                                UserStatus us = userMap.get(uName);
+                                if (us != null) {
+                                    us.setOnline(isOnline);
+                                    userList.repaint();
+                                }
+                                if (selectedUser != null && selectedUser.equalsIgnoreCase(uName)) {
+                                    currentChatLabel.setText("Chatting with: " + uName + " (" + (isOnline ? "● Online" : "○ Offline") + ")");
+                                }
+                            });
+                        }
+                    } 
+                    else if (msg.startsWith("CONTACT_ITEM:")) {
+                        String[] parts = msg.split(":", 3);
+                        if (parts.length >= 3) {
+                            String cName = parts[1].trim();
+                            boolean isOnline = parts[2].equalsIgnoreCase("Online");
+                            addContactToList(cName, isOnline);
+                        }
+                    }
+                    else if (msg.startsWith("ADD_CONTACT_RESP:")) {
+                        String[] parts = msg.split(":", 4);
+                        if (parts.length >= 2 && parts[1].equals("SUCCESS")) {
+                            if (parts.length >= 4) {
+                                String cName = parts[2].trim();
+                                boolean isOnline = parts[3].equalsIgnoreCase("Online");
+                                addContactToList(cName, isOnline);
+                                SwingUtilities.invokeLater(() -> 
+                                    JOptionPane.showMessageDialog(ChatClient.this, "User-ka " + cName + " You’ve been added, and you can now chat with them.!", "succesfull", JOptionPane.INFORMATION_MESSAGE)
+                                );
+                            }
+                        } else {
+                            String errReason = (parts.length >= 3) ? parts[2] : "Cilad ayaa dhacday";
+                            SwingUtilities.invokeLater(() -> 
+                                JOptionPane.showMessageDialog(ChatClient.this, errReason, "Digniin", JOptionPane.ERROR_MESSAGE)
+                            );
+                        }
+                    }
+                    else if (msg.startsWith("MSG_FROM:")) {
+                        String[] parts = msg.split(":", 3);
+                        if (parts.length >= 3) {
+                            String sender = parts[1].trim();
+                            String text = parts[2].trim();
+                            
+                            if (!userMap.containsKey(sender)) {
+                                addContactToList(sender, true);
+                            }
+                            
+                            if (selectedUser.equalsIgnoreCase(sender)) {
+                                appendMessage(sender + ": " + text);
+                            } else {
+                                UserStatus us = userMap.get(sender);
+                                if (us != null) {
+                                    us.incrementUnread();
+                                    userList.repaint();
+                                }
+                            }
+                        }
+                    }
+                    else if (msg.startsWith("MSG_ALL_FROM:")) {
+                        String[] parts = msg.split(":", 3);
+                        if (parts.length >= 3) {
+                            String sender = parts[1].trim();
+                            String text = parts[2].trim();
+                            if (selectedUser.equals("GLOBAL")) {
+                                appendMessage(sender + " (Global): " + text);
+                            }
+                        }
+                    }
+                    else if (msg.startsWith("CHAT_HISTORY_ITEM:")) {
+                        String[] parts = msg.split(":", 3);
+                        if (parts.length >= 3) {
+                            String historyMsg = parts[2].trim();
+                            appendMessage(historyMsg);
+                        }
+                    }
+                    else if (msg.startsWith("SYSTEM_MSG:")) {
+                        String sysMsg = msg.substring(11);
+                        appendMessage("[System]: " + sysMsg);
+                    }
                 }
             } catch (IOException e) {
-                System.out.println("Connection Lost!");
-            }
-        }).start();
-    }
-
-    private void processProtocol(String msg) {
-        if (msg == null || msg.trim().isEmpty()) return;
-
-        if (msg.startsWith("CONTACT_LIST:")) {
-            String data = msg.substring(13);
-            if (!data.isEmpty()) {
-                String[] items = data.split(";");
-                for (String item : items) {
-                    if (!item.isEmpty() && item.contains(",")) {
-                        String[] parts = item.split(",");
-                        if (parts.length >= 2 && !parts[0].equals(currentUser)) {
-                            userStatusMap.put(parts[0], parts[1]);
-                            unreadCountMap.putIfAbsent(parts[0], 0);
-                        }
-                    }
-                }
-                refreshContactListUI();
-            }
-        } 
-        else if (msg.startsWith("CONTACT_ADDED:")) {
-            String[] p = msg.split(":");
-            if (p.length >= 3) {
-                String newContact = p[1];
-                if (!newContact.equals(currentUser)) {
-                    userStatusMap.put(newContact, p[2]);
-                    unreadCountMap.putIfAbsent(newContact, 0);
-                    chatHistories.putIfAbsent(newContact, new ArrayList<>());
-                    refreshContactListUI();
-                }
-            }
-        } 
-        else if (msg.startsWith("USER_STATUS:")) {
-            String[] p = msg.split(":");
-            if (p.length >= 3) {
-                String name = p[1];
-                String status = p[2];
-                if (!name.equals(currentUser)) {
-                    userStatusMap.put(name, status);
-                    refreshContactListUI();
-                    if (name.equals(selectedUser)) {
-                        updateHeaderStatus(name, status);
-                    }
-                }
-            }
-        } 
-        else if (msg.startsWith("MSG:")) {
-            String[] p = msg.split(":", 5);
-            if (p.length >= 5) {
-                String msgId = p[1];
-                String sender = p[2];
-                String timeStr = p[3];
-                String text = p[4];
-                LocalDate dateNow = LocalDate.now();
-
-                if (!sender.equals(currentUser)) {
-                    if (!userStatusMap.containsKey(sender)) {
-                        userStatusMap.put(sender, "ONLINE");
-                        unreadCountMap.put(sender, 0);
-                    }
-
-                    MessageModel model = new MessageModel(msgId, sender, text, timeStr, dateNow, TickStatus.READ);
-                    java.util.List<MessageModel> history = chatHistories.computeIfAbsent(sender, k -> new ArrayList<>());
-
-                    if (sender.equals(selectedUser)) {
-                        if (history.isEmpty() || !history.get(history.size() - 1).date.equals(dateNow)) {
-                            appendDateDivider(dateNow);
-                        }
-                        appendBubble(model, false);
-                        out.println("MARK_READ:" + msgId + ":" + sender);
-                    } else {
-                        unreadCountMap.put(sender, unreadCountMap.getOrDefault(sender, 0) + 1);
-                        refreshContactListUI();
-                        Toolkit.getDefaultToolkit().beep();
-                    }
-                    history.add(model);
-                }
-            }
-        } 
-        else if (msg.startsWith("MSG_DELIVERED:")) {
-            String[] p = msg.split(":");
-            if (p.length >= 2) {
-                String msgId = p[1];
-                updateTickUI(msgId, "<font color='gray'>✓✓</font>");
-            }
-        } 
-        else if (msg.startsWith("MSG_READ:")) {
-            String[] p = msg.split(":");
-            if (p.length >= 2) {
-                String msgId = p[1];
-                updateTickUI(msgId, "<font color='#34B7F1'>✓✓</font>");
+                System.out.println("Connection lost to server.");
             }
         }
-    }
-
-    private void updateTickUI(String msgId, String tickHtml) {
-        JLabel label = messageLabelMap.get(msgId);
-        if (label != null) {
-            String currentText = label.getText();
-            currentText = currentText.replaceAll("<font color=.*?>.*?</font>", tickHtml);
-            label.setText(currentText);
-        }
-    }
-
-    // Contact List UI oo leh Goobo (Letter Avatar) ku dhex jira
-    private void refreshContactListUI() {
-        contactListModel.clear();
-        for (String name : userStatusMap.keySet()) {
-            if (!name.equals(currentUser)) {
-                String status = userStatusMap.get(name);
-                int unread = unreadCountMap.getOrDefault(name, 0);
-
-                String statusColor = status.equals("ONLINE") ? "#075E54" : "#888888";
-                String statusText = status.toLowerCase();
-                String initial = name.isEmpty() ? "?" : name.substring(0, 1).toUpperCase();
-
-                String badgeHtml = "";
-                if (unread > 0) {
-                    badgeHtml = "<span style='background-color:#25D366; color:white; font-weight:bold; " +
-                                "padding:1px 6px; border-radius:10px; font-size:10px;'>" + unread + "</span>";
-                }
-
-                String htmlItem = "<html><body style='width: 200px; padding: 2px;'>" +
-                        "<!--NAME:" + name + "-->" +
-                        "<table width='100%'><tr>" +
-                        "<td width='35'><div style='background-color:#128C7E; color:white; border-radius:50%; width:28px; height:28px; text-align:center; font-weight:bold; font-size:13px; line-height:28px;'>" + initial + "</div></td>" +
-                        "<td><b>" + name + "</b><br><span style='color:" + statusColor + "; font-size:10px;'>" + statusText + "</span></td>" +
-                        "<td align='right'>" + badgeHtml + "</td>" +
-                        "</tr></table></body></html>";
-
-                contactListModel.addElement(htmlItem);
-            }
-        }
-    }
-
-    private void loadConversation(String user) {
-        chatPanel.removeAll();
-        messageLabelMap.clear();
-
-        java.util.List<MessageModel> list = chatHistories.get(user);
-        if (list != null) {
-            LocalDate lastDate = null;
-            for (MessageModel m : list) {
-                if (lastDate == null || !lastDate.equals(m.date)) {
-                    appendDateDivider(m.date);
-                    lastDate = m.date;
-                }
-                boolean isSelf = m.sender.equals(currentUser);
-                appendBubble(m, isSelf);
-
-                if (!isSelf) {
-                    out.println("MARK_READ:" + m.id + ":" + m.sender);
-                }
-            }
-        }
-        chatPanel.revalidate();
-        chatPanel.repaint();
-    }
-
-    private void appendBubble(MessageModel m, boolean isSelf) {
-        JPanel bubble = new JPanel(new FlowLayout(isSelf ? FlowLayout.RIGHT : FlowLayout.LEFT, 0, 0));
-        bubble.setBackground(new Color(229, 221, 213));
-        bubble.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
-
-        String tickStr = "";
-        if (isSelf) {
-            if (m.status == TickStatus.SENT) tickStr = " <font color='gray'>✓</font>";
-            else if (m.status == TickStatus.DELIVERED) tickStr = " <font color='gray'>✓✓</font>";
-            else if (m.status == TickStatus.READ) tickStr = " <font color='#34B7F1'>✓✓</font>";
-        }
-
-        String htmlText = "<html><body style='font-family: Segoe UI, sans-serif; font-size: 11px; padding: 4px 8px;'>" +
-                m.text + " &nbsp;&nbsp;<sub style='font-size:8px; color:#888888;'>" + m.time + tickStr + "</sub></body></html>";
-
-        JLabel label = new JLabel(htmlText);
-        label.setOpaque(true);
-        label.setBackground(isSelf ? new Color(220, 248, 198) : Color.WHITE);
-        label.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(210, 210, 210), 1, true),
-                BorderFactory.createEmptyBorder(2, 4, 2, 4)
-        ));
-
-        bubble.add(label);
-
-        if (isSelf) {
-            messageLabelMap.put(m.id, label);
-        }
-
-        chatPanel.add(bubble);
-        chatPanel.add(Box.createVerticalStrut(6));
-        chatPanel.revalidate();
-        chatPanel.repaint();
     }
 }
